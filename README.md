@@ -1,6 +1,6 @@
 # Serverless Real-Time Music Analytics Pipeline
 
-Serverless pipeline that captures the Spotify track currently playing for an authenticated user, streams events through Amazon Kinesis, processes them with AWS Lambda, and lands enriched metrics in DynamoDB. The project is designed as a resume-ready example of real-time clickstream/telemetry processing with elastic, fully managed services.
+Serverless pipeline that captures the Spotify track currently playing for an authenticated user, streams events through Amazon Kinesis, processes them with AWS Lambda, and lands enriched metrics in DynamoDB. Built as a concise reference implementation of real-time clickstream/telemetry processing with elastic, fully managed services.
 
 ## What this project demonstrates
 - Polling Spotify's `current-user-playing` endpoint and deriving playback events (completed vs skipped) from listen time.
@@ -30,15 +30,10 @@ Spotify API → Python Producer → Kinesis Data Stream → Lambda Processor →
 - Optional: `uv` (recommended) or `pip` for Python dependency management
 
 ## Local setup
-1) Clone the repository and create a virtual environment:
+1) Create and activate a virtual environment:
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-```
-
-# Using uv (preferred)
-```bash
-uv init
 ```
 2) Install dependencies (choose one):
 ```bash
@@ -46,13 +41,13 @@ uv init
 uv pip install -e .
 
 # Using pip
-pip install
+pip install -e .
 ```
 3) Add a `.env` file in the project root with the required credentials:
 ```bash
 SPOTIFY_CLIENT_ID=your_client_id
 SPOTIFY_CLIENT_SECRET=your_client_secret
-SPOTIFY_REDIRECT_URI=your_redirect_uri
+SPOTIFY_REDIRECT_URI=http://localhost:8888/callback
 AWS_REGION=us-east-1
 KINESIS_STREAM_NAME=SpotifyStream
 ```
@@ -73,7 +68,7 @@ terraform init
 terraform apply
 ```
 - Provisions Kinesis (`SpotifyStream`), DynamoDB (`SpotifyEvents`), Lambda processor, IAM role/policy, and event source mapping.
-- The Lambda package is zipped from the processor code; ensure the `archive_file` source path aligns with `src/processor/function.py` if you adjust filenames.
+- Update the `archive_file` source in Terraform to point to `../src/processor/function.py` so the Lambda zip includes the current handler.
 - Remember to destroy resources when finished (`terraform destroy`) to avoid ongoing cloud charges.
 
 ## Event contract
@@ -82,7 +77,6 @@ Example payload emitted by the producer and stored by the Lambda processor:
 {
   "event_type": "track_change",
   "track_name": "My Song",
-  "track_id": "spotify_track_id",
   "status": "COMPLETED",
   "duration_listened": 142,
   "timestamp": 1731100000,

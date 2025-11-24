@@ -1,8 +1,8 @@
 .env
-.cache
 .venv
 
 __pycache__/
+.cache
 *.pyc
 *.pyo
 *.pyd

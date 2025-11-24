@@ -23,7 +23,7 @@ def main():
     """
     logger.info("Starting Spotify monitoring...")
     sp = get_spotify_client()
-    #kinesis = KinesisService()
+    kinesis = KinesisService()
     tracker = SpotifyTracker()
     
     user = sp.current_user()
@@ -40,7 +40,7 @@ def main():
                 event['user_id'] = user_id
 
                 logger.info(f"Track change detected: {event['track_name']} - {event['status']}")
-                #kinesis.send_event(event, partition_key=user_id)
+                kinesis.send_event(event, partition_key=user_id)
 
             if current_track and current_track.get('is_playing'):
                 logger.info(f"Currently playing: {current_track['item']['name']} by {', '.join(artist['name'] for artist in current_track['item']['artists'])}")

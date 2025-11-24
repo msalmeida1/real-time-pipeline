@@ -41,6 +41,7 @@ class SpotifyTracker:
             
             event = {
                 'event_type': 'track_change',
+                'track_id': self.current_track_id,
                 'track_name': self.current_track_name,
                 'status': status,
                 'duration_listened': int(duration),

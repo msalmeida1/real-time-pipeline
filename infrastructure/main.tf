@@ -53,7 +53,6 @@ resource "aws_iam_role" "lambda_processor_role" {
   })
 }
 
-# 3.2 A Policy (O que a identidade pode fazer)
 resource "aws_iam_role_policy" "lambda_policy" {
   name = "spotify_processor_policy"
   role = aws_iam_role.lambda_processor_role.id

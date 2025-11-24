@@ -1,4 +1,3 @@
-# src/producer/auth_manager.py
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 import os

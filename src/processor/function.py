@@ -5,7 +5,12 @@ import os
 import logging
 from decimal import Decimal
 
-logger = logging.getLogger()
+logging.basicConfig(
+    level=logging.INFO, 
+    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+)
+
+logger = logging.getLogger(__name__)
 
 dynamodb = boto3.resource('dynamodb')
 TABLE_NAME = os.environ.get('DYNAMODB_TABLE', 'SpotifyEvents')
@@ -29,8 +34,6 @@ def lambda_handler(event, context):
             kinesis_data = record['kinesis']['data']
             decoded_data = base64.b64decode(kinesis_data).decode('utf-8')
             payload = json.loads(decoded_data, parse_float=Decimal)
-
-            # future business logic
             
             user_id = payload['user_id']
             timestamp = payload['timestamp']

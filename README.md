@@ -89,8 +89,5 @@ Example payload emitted by the producer and stored by the Lambda processor:
 - Decodes base64 Kinesis records, parses JSON, applies business rules (placeholder for enrichments), and writes to DynamoDB.
 - Uses `boto3` with the table name supplied via the `DYNAMODB_TABLE` environment variable.
 
-## Next steps and polish ideas
-- Add unit tests/mocks around the producer tracker logic and the Lambda handler.
-- Expand the processor to enrich events (e.g., artist/genre lookups) and emit aggregates to downstream sinks.
-- Wire dashboards/alerts with CloudWatch or export to Amazon QuickSight/Athena for ad-hoc analysis.
-- Add CI to lint/test and to package/deploy the Lambda automatically on Terraform apply.
+
+## This project is under active development! So please check back for updates and improvements.

@@ -2,18 +2,24 @@ import time
 import json
 import os
 import boto3
+import logging
 from botocore.exceptions import ClientError
 from auth_manager import get_spotify_client
 from dotenv import load_dotenv
 
+logger = logging.getLogger()
+
 load_dotenv()
 
-# AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
-# STREAM_NAME = os.getenv('KINESIS_STREAM_NAME', 'SpotifyStream')
+AWS_REGION = os.getenv('AWS_REGION')
+STREAM_NAME = os.getenv('KINESIS_STREAM_NAME')
 
-# def create_kinesis_client():
-#     """Cria o cliente do Kinesis usando as credenciais do AWS CLI/Environment"""
-#     return boto3.client('kinesis', region_name=AWS_REGION)
+def create_kinesis_client():
+    """
+    Create and return a Kinesis client.
+    Returns: boto3 Kinesis client.
+    """
+    return boto3.client('kinesis', region_name=AWS_REGION)
 
 def format_event(track_data, user_id):
     """
@@ -28,10 +34,6 @@ def format_event(track_data, user_id):
         return None
 
     item = track_data['item']
-
-    # salvar um json para teste
-    with open('current_track.json', 'w') as f:
-        json.dump(track_data, f, indent=4)
     
     return {
         'event_type': 'listen_heartbeat',
@@ -47,13 +49,13 @@ def format_event(track_data, user_id):
     }
 
 def main():
-    print("🎧 Iniciando monitoramento do Spotify...")
+    logger.info("Starting Spotify monitoring...")
     sp = get_spotify_client()
-    #kinesis = create_kinesis_client()
+    kinesis = create_kinesis_client()
     
     user = sp.current_user()
     user_id = user['id']
-    print(f"👤 Usuário autenticado: {user['display_name']} ({user_id})")
+    logger.info(f"User authenticated: {user['display_name']} ({user_id})")
 
     while True:
         try:
@@ -64,27 +66,27 @@ def main():
                 
                 if event:
                     payload = json.dumps(event)
-                    print(f"🎵 Tocando: {event['track_name']} - {event['artist']} [{event['progress_ms']}ms]")
+                    logger.info(f"Playing: {event['track_name']} - {event['artist']} [{event['progress_ms']}ms]")
                     with open('payload.json', 'w') as f:
                         f.write(payload)
 
-                    # try:
-                    #     kinesis.put_record(
-                    #         StreamName=STREAM_NAME,
-                    #         Data=payload,
-                    #         PartitionKey=user_id 
-                    #     )
+                    try:
+                        kinesis.put_record(
+                            StreamName=STREAM_NAME,
+                            Data=payload,
+                            PartitionKey=user_id 
+                        )
 
-                    # except ClientError as e:
-                    #     if e.response['Error']['Code'] == 'ResourceNotFoundException':
-                    #         print("   ⚠️ AVISO: Kinesis Stream não encontrado. Crie-o na AWS ou aguarde o Terraform.")
-                    #     else:
-                    #         print(f"   ❌ Erro AWS: {e}")
+                    except ClientError as e:
+                        if e.response['Error']['Code'] == 'ResourceNotFoundException':
+                            logger.error(f"Stream {STREAM_NAME} not found.")
+                        else:
+                            logger.error(f"Failed to send record to Kinesis: {e}")
             else:
-                print("😴 Nenhuma música tocando...")
+                logger.info("No music playing...")
 
         except Exception as e:
-            print(f"❌ Erro no loop principal: {e}")
+            logger.info(f"Error fetching current track: {e}")
 
         time.sleep(5)
 

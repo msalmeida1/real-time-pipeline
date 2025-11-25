@@ -3,7 +3,7 @@
 Serverless pipeline that captures the Spotify track currently playing for an authenticated user, streams events through Amazon Kinesis, processes them with AWS Lambda, and lands enriched metrics in DynamoDB. Built as a concise reference implementation of real-time clickstream/telemetry processing with elastic, fully managed services.
 
 ## What this project demonstrates
-![Architecture Diagram](docs/architecture.svg)
+![Architecture Diagram](docs/architecture.png)
 - Polling Spotify's `current-user-playing` endpoint and deriving playback events (completed vs skipped) from listen time.
 - Publishing user playback events to Kinesis Data Streams (buffering and fan-out ready for additional consumers).
 - Lambda consumer that decodes Kinesis batches and persists normalized events to a DynamoDB table.

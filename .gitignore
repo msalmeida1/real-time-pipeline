@@ -7,4 +7,10 @@ __pycache__/
 *.pyo
 *.pyd
 
+infrastructure/.terraform/
+infrastructure/terraform.tfstate
+infrastructure/terraform.tfstate.backup
+infrastructure/.terraform.lock.hcl
+infrastructure/lambda_function.zip
+
 DISCOVERY.md

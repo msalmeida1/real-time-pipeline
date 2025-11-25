@@ -1,7 +1,7 @@
 [project]
 name = "real-time-recommendation"
 version = "0.1.0"
-description = "Add your description here"
+description = "Real-time clickstream/telemetry with Spotify + AWS (Kinesis, Lambda, DynamoDB) and Infrastructure as Code."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

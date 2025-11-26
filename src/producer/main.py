@@ -36,11 +36,16 @@ def main():
             
             event = tracker.check_status(current_track)
                 
-            if event:
+            if event and event.get('processing_path') == 'hot':
                 event['user_id'] = user_id
 
                 logger.info(f"Track change detected: {event['track_name']} - {event['status']}")
                 kinesis.send_event(event, partition_key=user_id)
+
+            if event and event.get('processing_path') == 'cold':
+                current_track['user_id'] = user_id
+
+                kinesis.send_event(current_track, partition_key=user_id)
 
             if current_track and current_track.get('is_playing'):
                 logger.info(f"Currently playing: {current_track['item']['name']} by {', '.join(artist['name'] for artist in current_track['item']['artists'])}")

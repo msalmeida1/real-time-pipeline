@@ -38,12 +38,14 @@ class SpotifyTracker:
             duration = now - self.start_time
             
             status = 'SKIPPED' if duration < self.min_listen_time else 'COMPLETED'
+            processing_path = 'hot' if status == 'SKIPPED' else 'cold'
             
             event = {
                 'event_type': 'track_change',
                 'track_id': self.current_track_id,
                 'track_name': self.current_track_name,
                 'status': status,
+                'processing_path': processing_path,
                 'duration_listened': int(duration),
                 'timestamp': int(now)
             }

@@ -18,7 +18,7 @@ table = dynamodb.Table(TABLE_NAME)
 
 def lambda_handler(event, context):
     """
-    Handler for processing Kinesis events.
+    Handler for processing Kinesis hot path events.
     Args:
         event (dict): Event received from Kinesis.
         context (LambdaContext): Lambda execution context.
@@ -34,9 +34,13 @@ def lambda_handler(event, context):
             kinesis_data = record['kinesis']['data']
             decoded_data = base64.b64decode(kinesis_data).decode('utf-8')
             payload = json.loads(decoded_data, parse_float=Decimal)
+
+            processing_path = payload.get('processing_path', 'hot')
+            if processing_path != 'hot':
+                logger.info(f"Skipping cold-path event for DynamoDB: {payload}")
+                continue
             
             user_id = payload['user_id']
-            timestamp = payload['timestamp']
             track_name = payload['track_name']
 
             logger.info(f"Saving: {user_id} listened to {track_name}")

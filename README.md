@@ -1,6 +1,6 @@
 # Serverless Real-Time Music Analytics Pipeline
 
-Serverless pipeline that captures the Spotify track currently playing for an authenticated user, streams events through Amazon Kinesis, processes them with AWS Lambda, and lands enriched metrics in DynamoDB. Built as a concise reference implementation of real-time clickstream/telemetry processing with elastic, fully managed services.
+Serverless pipeline that captures the Spotify track currently playing for an authenticated user, streams events through Amazon Kinesis, bifurcates events into hot and cold paths, and lands enriched metrics in DynamoDB (hot) or S3/Glacier (cold) as Parquet. Built as a concise reference implementation of real-time clickstream/telemetry processing with elastic, fully managed services.
 
 ## What this project demonstrates
 ![Architecture Diagram](docs/architecture.png)
@@ -12,15 +12,17 @@ Serverless pipeline that captures the Spotify track currently playing for an aut
 
 ## Architecture
 ```
-Spotify API → Python Producer → Kinesis Data Stream → Lambda Processor → DynamoDB
-                                   │
-                                   └─ CloudWatch Logs (observability)
+Spotify API → Python Producer → Kinesis Data Stream
+                                    ├─ Lambda (hot_path_function) → DynamoDB (hot path)
+                                    └─ 2× Kinesis Firehose (Lambda transform) → S3 (Parquet, dynamic partitioning by user_id, lifecycle → Glacier) (cold & hot archival)
+                                                              │
+                                                              └─ Glue Catalog (Parquet schema)
 ```
 
 ## Repository layout
 - `src/producer/` — Spotify client auth (`auth.py`), playback tracker (`tracker.py`), and publisher entrypoint (`main.py`) that can push to Kinesis.
-- `src/processor/` — Lambda handler (`function.py`) that reads Kinesis records, applies business rules, and writes to DynamoDB.
-- `infrastructure/` — Terraform to provision Kinesis, DynamoDB, Lambda, IAM role/policy, and event source mapping.
+- `src/processor/` — Lambda handlers: `hot_path_function.py` (hot path to DynamoDB) and `cold_path_function.py` (Firehose transform shared by hot/cold Firehoses, filtered via `PROCESSING_PATH` env).
+- `infrastructure/` — Terraform to provision Kinesis, DynamoDB, Lambdas, Firehoses (hot/cold), S3 buckets (hot/cold), Glue catalog tables, IAM, and event source mapping.
 - `pyproject.toml`, `uv.lock` — Python dependencies (works with `uv` or `pip`).
 
 ## Prerequisites
@@ -68,8 +70,8 @@ From `infrastructure/`:
 terraform init
 terraform apply
 ```
-- Provisions Kinesis (`SpotifyStream`), DynamoDB (`SpotifyEvents`), Lambda processor, IAM role/policy, and event source mapping.
-- Update the `archive_file` source in Terraform to point to `../src/processor/function.py` so the Lambda zip includes the current handler.
+- Provisions Kinesis (`SpotifyStream`), DynamoDB (`SpotifyEvents`), Lambdas, Firehoses (hot and cold) with Parquet conversion, Glue catalog, S3 buckets with lifecycle (cold → Glacier), IAM role/policy, and event source mapping.
+- Update the `archive_file` sources in Terraform to point to `../src/processor/hot_path_function.py` and `../src/processor/cold_path_function.py` so the Lambda zips include the current handlers.
 - Remember to destroy resources when finished (`terraform destroy`) to avoid ongoing cloud charges.
 
 ## Event contract
@@ -81,14 +83,14 @@ Example payload emitted by the producer and stored by the Lambda processor:
   "status": "COMPLETED",
   "duration_listened": 142,
   "timestamp": 1731100000,
-  "user_id": "spotify_user_id"
+  "user_id": "spotify_user_id",
+  "processing_path": "hot"
 }
 ```
 
 ## How the processor works
-- Triggered by Kinesis batches via event source mapping.
-- Decodes base64 Kinesis records, parses JSON, applies business rules (placeholder for enrichments), and writes to DynamoDB.
-- Uses `boto3` with the table name supplied via the `DYNAMODB_TABLE` environment variable.
+- Hot path: Lambda (`hot_path_function`) is triggered by Kinesis batches, decodes records, filters for `processing_path == "hot"`, applies business rules, and writes to DynamoDB via the `DYNAMODB_TABLE` env var.
+- Cold/archival paths: Two Firehoses source the same Kinesis stream, invoke `cold_path_function` with `PROCESSING_PATH` env (`hot`/`cold`) to filter/flatten and emit Parquet to S3, partitioned by `user_id` with Glue schema for downstream analytics. Cold bucket transitions to Glacier via lifecycle.
 
 
 ## This project is under active development! So please check back for updates and improvements.

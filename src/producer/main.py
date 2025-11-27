@@ -39,12 +39,14 @@ def main():
             if event and event.get('processing_path') == 'hot':
                 event['user_id'] = user_id
 
-                logger.info(f"Track change detected: {event['track_name']} - {event['status']}")
+                logger.info(f"Sending hot-path event for track: {event['track_name']}")
                 kinesis.send_event(event, partition_key=user_id)
 
-            if event and event.get('processing_path') == 'cold':
+            else:
                 current_track['user_id'] = user_id
+                current_track['processing_path'] = 'cold'
 
+                logger.info(f"Sending cold-path event for track: {current_track['item']['name']}")
                 kinesis.send_event(current_track, partition_key=user_id)
 
             if current_track and current_track.get('is_playing'):

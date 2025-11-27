@@ -25,6 +25,7 @@ def lambda_handler(event, context):
     Returns:
         dict: Execution result.
     """
+    logger.info(f"Lambda triggered with event: {json.dumps(event)}")
     records_to_process = event['Records']
     logger.info(f"Received batch with {len(records_to_process)} lines from Kinesis.")
 
@@ -48,7 +49,7 @@ def lambda_handler(event, context):
             table.put_item(Item=payload)
 
         except Exception as e:
-            logger.info(f"Error processing registry: {e}")
+            logger.exception(f"Error processing registry: {e}")
 
     return {
         'statusCode': 200,

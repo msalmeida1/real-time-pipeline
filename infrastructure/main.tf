@@ -264,7 +264,8 @@ resource "aws_iam_role_policy" "lambda_policy" {
           "kinesis:GetRecords",
           "kinesis:GetShardIterator",
           "kinesis:DescribeStream",
-          "kinesis:ListStreams"
+          "kinesis:ListStreams",
+          "kinesis:ListShards"
         ]
         Resource = aws_kinesis_stream.music_stream.arn
       },
@@ -379,10 +380,10 @@ resource "aws_iam_role_policy" "firehose_policy" {
           "lambda:GetFunctionConfiguration"
         ]
         Resource = [
-          aws_lambda_function.firehose_transform.arn,
-          "${aws_lambda_function.firehose_transform.arn}:*",
-          aws_lambda_function.firehose_transform_hot.arn,
-          "${aws_lambda_function.firehose_transform_hot.arn}:*"
+          aws_lambda_function.firehose_transform_cold_path_cold_data.arn,
+          "${aws_lambda_function.firehose_transform_cold_path_cold_data.arn}:*",
+          aws_lambda_function.firehose_transform_cold_path_hot_data.arn,
+          "${aws_lambda_function.firehose_transform_cold_path_hot_data.arn}:*"
         ]
       },
       {
@@ -439,9 +440,14 @@ resource "aws_lambda_function" "processor" {
   }
 }
 
-resource "aws_lambda_function" "firehose_transform_cold" {
+resource "aws_cloudwatch_log_group" "processor_logs" {
+  name              = "/aws/lambda/hot_path_function"
+  retention_in_days = 1
+}
+
+resource "aws_lambda_function" "firehose_transform_cold_path_cold_data" {
   filename         = "cold_path_function.zip"
-  function_name    = "cold_path_firehose_function"
+  function_name    = "cold_path_cold_data_firehose_function"
   role             = aws_iam_role.firehose_transform_role.arn
   handler          = "cold_path_function.lambda_handler"
   runtime          = "python3.11"
@@ -455,9 +461,14 @@ resource "aws_lambda_function" "firehose_transform_cold" {
   }
 }
 
-resource "aws_lambda_function" "firehose_transform_hot" {
+resource "aws_cloudwatch_log_group" "cold_path_cold_data_logs" {
+  name              = "/aws/lambda/cold_path_cold_data_firehose_function"
+  retention_in_days = 1
+}
+
+resource "aws_lambda_function" "firehose_transform_cold_path_hot_data" {
   filename         = "cold_path_function.zip"
-  function_name    = "hot_path_firehose_function"
+  function_name    = "cold_path_hot_data_firehose_function"
   role             = aws_iam_role.firehose_transform_role.arn
   handler          = "cold_path_function.lambda_handler"
   runtime          = "python3.11"
@@ -470,12 +481,16 @@ resource "aws_lambda_function" "firehose_transform_hot" {
     }
   }
 }
+resource "aws_cloudwatch_log_group" "cold_path_hot_data_logs" {
+  name              = "/aws/lambda/cold_path_hot_data_firehose_function"
+  retention_in_days = 1
+}
 
 # Event Source Mapping
 resource "aws_lambda_event_source_mapping" "kinesis_trigger" {
   event_source_arn  = aws_kinesis_stream.music_stream.arn
   function_name     = aws_lambda_function.processor.arn
-  starting_position = "LATEST" 
+  starting_position = "TRIM_HORIZON" 
   batch_size        = 30       
   enabled           = true
 }
@@ -495,8 +510,8 @@ resource "aws_kinesis_firehose_delivery_stream" "cold_events" {
     prefix     = "cold/user_id=!{partitionKeyFromLambda:user_id}/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/"
     error_output_prefix = "firehose-failures/cold/!{firehose:error-output-type}/!{timestamp:yyyy/MM/dd}/"
     buffering_interval  = 300
-    buffering_size      = 5
-    compression_format  = "SNAPPY"
+    buffering_size      = 64
+    compression_format  = "UNCOMPRESSED"
 
     dynamic_partitioning_configuration {
       enabled = true
@@ -514,7 +529,7 @@ resource "aws_kinesis_firehose_delivery_stream" "cold_events" {
         type = "Lambda"
         parameters {
           parameter_name  = "LambdaArn"
-          parameter_value = aws_lambda_function.firehose_transform.arn
+          parameter_value = aws_lambda_function.firehose_transform_cold_path_cold_data.arn
         }
         parameters {
           parameter_name  = "NumberOfRetries"
@@ -554,7 +569,7 @@ resource "aws_kinesis_firehose_delivery_stream" "cold_events" {
 resource "aws_lambda_permission" "allow_firehose_invoke" {
   statement_id  = "AllowExecutionFromFirehose"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.firehose_transform_cold.function_name
+  function_name = aws_lambda_function.firehose_transform_cold_path_cold_data.function_name
   principal     = "firehose.amazonaws.com"
   source_arn    = aws_kinesis_firehose_delivery_stream.cold_events.arn
 }
@@ -574,8 +589,8 @@ resource "aws_kinesis_firehose_delivery_stream" "hot_events" {
     prefix     = "hot/user_id=!{partitionKeyFromLambda:user_id}/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/"
     error_output_prefix = "firehose-failures/hot/!{firehose:error-output-type}/!{timestamp:yyyy/MM/dd}/"
     buffering_interval  = 300
-    buffering_size      = 5
-    compression_format  = "SNAPPY"
+    buffering_size      = 64
+    compression_format  = "UNCOMPRESSED"
 
     dynamic_partitioning_configuration {
       enabled = true
@@ -593,7 +608,7 @@ resource "aws_kinesis_firehose_delivery_stream" "hot_events" {
         type = "Lambda"
         parameters {
           parameter_name  = "LambdaArn"
-          parameter_value = aws_lambda_function.firehose_transform_hot.arn
+          parameter_value = aws_lambda_function.firehose_transform_cold_path_hot_data.arn
         }
         parameters {
           parameter_name  = "NumberOfRetries"
@@ -633,7 +648,7 @@ resource "aws_kinesis_firehose_delivery_stream" "hot_events" {
 resource "aws_lambda_permission" "allow_firehose_invoke_hot" {
   statement_id  = "AllowExecutionFromFirehoseHot"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.firehose_transform_hot.function_name
+  function_name = aws_lambda_function.firehose_transform_cold_path_hot_data.function_name
   principal     = "firehose.amazonaws.com"
   source_arn    = aws_kinesis_firehose_delivery_stream.hot_events.arn
 }

@@ -9,8 +9,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Firehose will set PROCESSING_PATH to either "hot" or "cold" depending on the
-# delivery stream. Defaults to cold.
 PROCESSING_PATH = os.environ.get("PROCESSING_PATH", "cold")
 
 def transform_data(event):
@@ -60,7 +58,14 @@ def transform_data(event):
     return event
 
 def lambda_handler(event, context):
-    """Transform records from Firehose and drop anything outside PROCESSING_PATH."""
+    """
+    Transform records from Firehose and drop anything outside PROCESSING_PATH.
+    Args:
+        event (dict): Event received from Firehose.
+        context (LambdaContext): Lambda execution context.
+    Returns:
+        dict: Transformed records.
+    """
     transformed_records = []
 
     for record in event.get("records", []):
@@ -68,6 +73,8 @@ def lambda_handler(event, context):
         try:
             raw_data = base64.b64decode(record["data"]).decode("utf-8")
             payload = json.loads(raw_data)
+
+            logger.info(f"Processing record for {payload.get('processing_path')} path.")
 
             if payload.get("processing_path") != PROCESSING_PATH:
                 transformed_records.append(
@@ -88,6 +95,7 @@ def lambda_handler(event, context):
                     "metadata": {"partitionKeys": {"user_id": user_id}},
                 }
             )
+            logger.info(f"Successfully transformed record {record_id} for user {user_id}.")
 
         except Exception as exc:
             logger.error(f"Error transforming record {record_id}: {exc}")

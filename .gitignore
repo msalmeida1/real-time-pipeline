@@ -11,7 +11,9 @@ infrastructure/.terraform/
 infrastructure/terraform.tfstate
 infrastructure/terraform.tfstate.backup
 infrastructure/.terraform.lock.hcl
+infrastructure/.terraform.tfstate.lock.info
 infrastructure/*.zip
+infrastructure/build
 
 *.json
 

@@ -2,19 +2,21 @@ import json
 import boto3
 import base64
 import os
-import logging
 import time
 from decimal import Decimal
+
+import logging
 
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 
-logging.basicConfig(
-    level=logging.INFO, 
-    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-)
-
 logger = logging.getLogger(__name__)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(name)s - %(message)s"))
+    logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+logging.getLogger().setLevel(logging.INFO)
 
 sp_auth = SpotifyClientCredentials(
     client_id=os.environ.get('SPOTIFY_CLIENT_ID'),
@@ -99,6 +101,33 @@ def update_genre_affinity(current_genres: dict, new_genres: list[str]) -> dict:
         current_genres[safe_genre] = current_genres.get(safe_genre, 0) + 1
     return current_genres
 
+def update_artist_affinity(current_artists: list[str], new_artists: dict) -> dict:
+    """
+    Update artist affinity data.
+    Args:
+        current_artists (list): Existing artist data.
+        new_artists (dict): Dict of artist data from the new track.
+    Returns:
+        list: Updated artist data.
+    """
+    current_artists = current_artists or []
+    artist_map = {artist['artist_id']: artist for artist in current_artists}
+    now = int(time.time())
+    artist_id = new_artists['id']
+
+    if artist_id not in artist_map:
+        artist_map[artist_id] = {
+            'artist_id': artist_id,
+            'name': new_artists['name'],
+            'affinity': 1,
+            'last_played_ts': now
+        }
+    else:
+        artist_map[artist_id]['affinity'] += 1
+        artist_map[artist_id]['last_played_ts'] = now
+
+    return current_artists
+
 
 def update_user_profile(user_id: str, track_id: str, status: str) -> None:
     """
@@ -117,15 +146,18 @@ def update_user_profile(user_id: str, track_id: str, status: str) -> None:
         profile = resp.get('Item', {
             'user_id': user_id,
             'created_at': now,
+            'updated_at': now,
+            'last_event_ts': now,
             'audio_profile': {'samples': 0},
             'genre_affinity': {},
+            'artist_affinity': [],
             'recent_history': [],
             'total_tracks_played': 0,
             'total_completions': 0,
             'total_skips': 0,
         })
     except Exception as e:
-        logger.exception(f"Erro lendo DynamoDB para user {user_id}: {e}")
+        logger.exception(f"Error fetching profile for user {user_id}: {e}")
         return
 
     profile['updated_at'] = now
@@ -144,6 +176,11 @@ def update_user_profile(user_id: str, track_id: str, status: str) -> None:
             profile['genre_affinity'] = update_genre_affinity(
                 profile.get('genre_affinity', {}),
                 genres,
+            )
+
+            profile['artist_affinity'] = update_artist_affinity(
+                profile.get('artist_affinity', []),
+                artist_info
             )
 
     elif status == 'SKIPPED':

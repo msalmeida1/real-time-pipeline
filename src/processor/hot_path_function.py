@@ -18,15 +18,52 @@ if not logger.handlers:
 logger.setLevel(logging.INFO)
 logging.getLogger().setLevel(logging.INFO)
 
-sp_auth = SpotifyClientCredentials(
-    client_id=os.environ.get('SPOTIFY_CLIENT_ID'),
-    client_secret=os.environ.get('SPOTIFY_CLIENT_SECRET')
-)
-sp = spotipy.Spotify(client_credentials_manager=sp_auth)
+SPOTIFY_SECRET_ID = os.environ.get("SPOTIFY_SECRET_ID")
+
+secrets_manager = boto3.client("secretsmanager")
+_spotify_client = None
 
 dynamodb = boto3.resource('dynamodb')
 TABLE_NAME = os.environ.get('DYNAMODB_TABLE')
 profile_table = dynamodb.Table(TABLE_NAME)
+
+
+def get_spotify_client():
+    """
+    Initialize and return a Spotify client using credentials from AWS Secrets Manager.
+    Returns:
+        spotipy.Spotify: Authenticated Spotify client.
+    Raises:
+        RuntimeError: If credentials are missing or cannot be retrieved.
+    """
+    global _spotify_client
+    if _spotify_client:
+        return _spotify_client
+
+    if not SPOTIFY_SECRET_ID:
+        raise RuntimeError("Missing SPOTIFY_SECRET_ID environment variable")
+
+    try:
+        secret_value = secrets_manager.get_secret_value(SecretId=SPOTIFY_SECRET_ID)
+        secret_string = secret_value.get("SecretString")
+        if not secret_string and "SecretBinary" in secret_value:
+            secret_string = base64.b64decode(secret_value["SecretBinary"]).decode("utf-8")
+
+        creds = json.loads(secret_string or "{}")
+        client_id = creds.get("SPOTIFY_CLIENT_ID")
+        client_secret = creds.get("SPOTIFY_CLIENT_SECRET")
+        if not client_id or not client_secret:
+            raise RuntimeError("Secret missing client_id or client_secret fields")
+
+        auth = SpotifyClientCredentials(
+            client_id=client_id,
+            client_secret=client_secret
+        )
+        _spotify_client = spotipy.Spotify(client_credentials_manager=auth)
+        return _spotify_client
+    except Exception:
+        logger.exception("Failed to load Spotify credentials from Secrets Manager")
+        raise
 
 
 def track_metadata(track_id: str):
@@ -38,10 +75,11 @@ def track_metadata(track_id: str):
         tuple: (audio_features, genres, track_info, artist_info) or None on error
     """
     try:
-        features = sp.audio_features([track_id])[0]
-        track_info = sp.track(track_id)
+        spotify_client = get_spotify_client()
+        features = spotify_client.audio_features([track_id])[0]
+        track_info = spotify_client.track(track_id)
         artist_id = track_info['artists'][0]['id']
-        artist_info = sp.artist(artist_id)
+        artist_info = spotify_client.artist(artist_id)
         genres = artist_info.get('genres', [])
 
         return features, genres, track_info, artist_info

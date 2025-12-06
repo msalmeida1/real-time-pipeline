@@ -2,6 +2,7 @@ import boto3
 import json
 import os
 import logging
+import requests
 
 logging.basicConfig(
     level=logging.INFO, 
@@ -10,21 +11,19 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-class KinesisService:
-    def __init__(self):
-        self.client = boto3.client('kinesis', region_name=os.getenv('AWS_REGION', 'us-east-1'))
-        self.stream_name = os.getenv('KINESIS_STREAM_NAME')
-
-    def send_event(self, event_data, partition_key):
-        if not self.stream_name:
-            logger.info("Kinesis stream name not configured.")
-            return
-
-        try:
-            self.client.put_record(
-                StreamName=self.stream_name,
-                Data=json.dumps(event_data),
-                PartitionKey=str(partition_key)
-            )
-        except Exception as e:
-            logger.error(f"Error sending event to Kinesis: {e}")
+def post_api_event(event):
+    """
+    Post event data to the specified API endpoint.
+    Args:
+        event (dict): Event data to be sent.
+    Returns:
+        requests.Response: Response object from the POST request.
+    """
+    url = "https://a1zru0y1ed.execute-api.us-east-1.amazonaws.com/dev/events"
+    try:
+        response = requests.post(url=url, json=event)
+        response.raise_for_status()
+        return response
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error posting event to API: {e}")
+        return None

@@ -20,3 +20,5 @@ infrastructure/modules/**/*.zip
 *.json
 
 DISCOVERY.md
+
+tests/*

@@ -1,8 +1,8 @@
 import time
 import logging
 
-from producer.main import main as producer_main
-from recommender.main import main as recommender_main
+from producer.main import main as producer
+from recommender.main import main as recommender
 
 logging.basicConfig(
     level=logging.INFO, 
@@ -18,6 +18,6 @@ def main():
     logger.info("Starting main application...")
     
     while True:
-        producer_main()
-        recommender_main()
-        time.sleep(5)  
+        producer()
+        recommender()
+        time.sleep(5)

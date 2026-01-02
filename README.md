@@ -1,96 +1,105 @@
-# Serverless Real-Time Music Analytics Pipeline
+# Real-Time Music Recommendation (Serverless + Amazon Personalize)
 
-Serverless pipeline that captures the Spotify track currently playing for an authenticated user, streams events through Amazon Kinesis, bifurcates events into hot and cold paths, and lands enriched metrics in DynamoDB (hot) or S3/Glacier (cold) as Parquet. Built as a concise reference implementation of real-time clickstream/telemetry processing with elastic, fully managed services.
+## Overview
 
-## What this project demonstrates
-![Architecture Diagram](docs/architecture.svg)
-- Polling Spotify's `current-user-playing` endpoint and deriving playback events (completed vs skipped) from listen time.
-- Publishing user playback events to Kinesis Data Streams (buffering and fan-out ready for additional consumers).
-- Lambda consumer that decodes Kinesis batches and persists normalized events to a DynamoDB table.
-- Infrastructure-as-Code with Terraform for Kinesis, DynamoDB, Lambda, IAM, and CloudWatch logging.
-- Python 3.11 codebase with clear separation between producer (client-side) and processor (serverless) concerns.
+This project is a **serverless real-time recommendation system** that:
+
+- Captures the user’s **current track on Spotify**.
+- Builds a **musical profile** for each user (genres, artists, audio features).
+- Uses **Amazon Personalize** to recommend new songs based on:
+  - recent listening behavior (interactions), and  
+  - long-term musical taste (user profile).
+
+The goal is to demonstrate how to build a scalable, low-latency recommendation system using serverless AWS services and Amazon Personalize.
+
+---
 
 ## Architecture
-```
-Spotify API → Python Producer → Kinesis Data Stream
-                                    ├─ Lambda (hot_path_function) → DynamoDB (hot path)
-                                    └─ 2× Kinesis Firehose (Lambda transform) → S3 (Parquet, dynamic partitioning by user_id, lifecycle → Glacier) (cold & hot archival)
-                                                              │
-                                                              └─ Glue Catalog (Parquet schema)
-```
 
-## Repository layout
-- `src/producer/` — Spotify client auth (`auth.py`), playback tracker (`tracker.py`), and publisher entrypoint (`main.py`) that can push to Kinesis.
-- `src/processor/` — Lambda handlers: `hot_path_function.py` (hot path to DynamoDB) and `cold_path_function.py` (Firehose transform shared by hot/cold Firehoses, filtered via `PROCESSING_PATH` env).
-- `infrastructure/` — Terraform to provision Kinesis, DynamoDB, Lambdas, Firehoses (hot/cold), S3 buckets (hot/cold), Glue catalog tables, IAM, and event source mapping.
-- `pyproject.toml`, `uv.lock` — Python dependencies (works with `uv` or `pip`).
+![Architecture Diagram](docs/architecture.png)
 
-## Prerequisites
-- Python 3.11+
-- Terraform >= 1.2
-- AWS account with credentials configured locally (for Terraform and Kinesis/Lambda/DynamoDB access)
-- Spotify Developer application with `user-read-currently-playing` scope enabled
-- Optional: `uv` (recommended) or `pip` for Python dependency management
+At a high level, the system is split into three main parts:
 
-## Local setup
-1) Create and activate a virtual environment:
-```bash
-python -m venv .venv
-source .venv/bin/activate
-```
-2) Install dependencies (choose one):
-```bash
-# Using uv (preferred)
-uv pip install -e .
+1. **Producer**
+2. **Processor**
+3. **Recommender**
 
-# Using pip
-pip install -e .
-```
-3) Add a `.env` file in the project root with the required credentials:
-```bash
-SPOTIFY_CLIENT_ID=your_client_id
-SPOTIFY_CLIENT_SECRET=your_client_secret
-SPOTIFY_REDIRECT_URI=http://localhost:8888/callback
-AWS_REGION=us-east-1
-KINESIS_STREAM_NAME=SpotifyStream
-```
-Your AWS credentials/profile should be available to the SDK (e.g., via `~/.aws/credentials` or environment variables).
+### 1. Producer
 
-## Running the local producer
-The producer polls Spotify every 5 seconds and derives events when a track changes. Events are marked `COMPLETED` when listened for at least 30 seconds; otherwise they are `SKIPPED`.
-```bash
-python src/producer/main.py
-```
-- By default the Kinesis publish call in `src/producer/main.py` is commented out to avoid unintended AWS writes. If your stream is provisioned, uncomment the `KinesisService` lines to start sending events.
-- Logged output includes the current track and any emitted track-change events (with user id attached).
+- Local script/app using **Spotify API (Spotipy)**.
+- Tracks the current user playback (play, skip, complete, etc.).
+- Sends normalized events to an **ingestion API (API Gateway)** in near real time.
 
-## Deploying the AWS stack with Terraform
-From `infrastructure/`:
-```bash
-terraform init
-terraform apply
-```
-- Provisions Kinesis (`SpotifyStream`), DynamoDB (`SpotifyEvents`), Lambdas, Firehoses (hot and cold) with Parquet conversion, Glue catalog, S3 buckets with lifecycle (cold → Glacier), IAM role/policy, and event source mapping.
-- Update the `archive_file` sources in Terraform to point to `../src/processor/hot_path_function.py` and `../src/processor/cold_path_function.py` so the Lambda zips include the current handlers.
-- Remember to destroy resources when finished (`terraform destroy`) to avoid ongoing cloud charges.
+### 2. Processor
 
-## Event contract
-Example payload emitted by the producer and stored by the Lambda processor:
-```json
-{
-  "event_type": "track_change",
-  "track_name": "My Song",
-  "status": "COMPLETED",
-  "duration_listened": 142,
-  "timestamp": 1731100000,
-  "user_id": "spotify_user_id",
-  "processing_path": "hot"
-}
-```
+- **API Gateway → Kinesis Data Streams**  
+  Central entry point for all track events.
 
-## How the processor works
-- Hot path: Lambda (`hot_path_function`) is triggered by Kinesis batches, decodes records, filters for `processing_path == "hot"`, applies business rules, and writes to DynamoDB via the `DYNAMODB_TABLE` env var.
-- Cold/archival paths: Two Firehoses source the same Kinesis stream, invoke `cold_path_function` with `PROCESSING_PATH` env (`hot`/`cold`) to filter/flatten and emit Parquet to S3, partitioned by `user_id` with Glue schema for downstream analytics. Cold bucket transitions to Glacier via lifecycle.
+- **Hot Path (Real Time)**
+  - **Lambda (Hot Path)** consumes from Kinesis.
+  - Sends interaction events to **Amazon Personalize** using `PutEvents`
+    so the model can react quickly to new behavior.
+
+- **Cold Path (Data Lake)**
+  - **Kinesis Firehose** writes raw and/or transformed events to **S3**.
+  - **Glue Catalog** exposes this data for analytics (Athena, etc.).
+  - **Lifecycle rules** move old data to **S3 Glacier**.
+
+- **User Musical Profile**
+  - Another consumer builds an aggregated **musical profile per user**  
+    (favorite genres, artists, average audio features, recent history).
+  - Profiles are stored in **DynamoDB**, one item per `user_id`.
+
+- **Batch Dataset Builder (Daily)**
+  - **EventBridge** triggers a daily **Lambda** that:
+    - Reads user profiles from **DynamoDB**.
+    - Reads interaction history from **S3**.
+    - Generates the three **Amazon Personalize datasets** in S3:
+      - Interactions (what the user listened to and when),
+      - Users (features derived from the musical profile),
+      - Items (Spotify songs dataset from Kaggle).
+    - Starts **dataset import jobs** to keep Personalize up to date.
+
+### 3. Recommender
+
+- **API Gateway – Recommendations**
+  - Public endpoint, e.g. `GET /recommendations?user_id=...`.
+
+- **Lambda – Recommendation Service**
+  - Calls **Amazon Personalize Runtime (`GetRecommendations`)** using the active campaign.
+  - Returns a ranked list of `track_id`s that should match the user’s musical taste.
+
+---
+
+## Amazon Personalize
+
+Amazon Personalize is used as the managed recommendation engine.
+
+Datasets:
+
+- **INTERACTIONS**  
+  - User–Item events from the streaming pipeline.
+
+- **ITEMS**  
+  - Spotify tracks metadata (Kaggle dataset: artist, genre, danceability, energy, etc.).
+
+- **USERS**  
+  - Features derived from the DynamoDB musical profile (favorite genre, average audio profile, counts, etc.).
+
+Resources:
+
+- **Dataset Group** with Interactions, Items and Users.
+- **Event Tracker** for real-time `PutEvents`.
+- **Solution & Solution Version** using a user-personalization recipe.
+- **Campaign** serving real-time recommendations via `GetRecommendations`.
+
+---
+
+## Tech Stack
+
+- **AWS**: API Gateway, Kinesis Data Streams, Kinesis Firehose, Lambda, DynamoDB, S3, Glue, S3 Glacier, EventBridge, Amazon Personalize.
+- **Spotify**: Spotipy (Python client).
+- **Languages**: Python ( Lambdas & producer ), Terraform/SST (infrastructure as code – planned).
 
 
-## This project is under active development! So please check back for updates and improvements.
+### **This project is on current development!**

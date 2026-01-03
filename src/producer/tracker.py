@@ -9,11 +9,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class SpotifyTracker:
-    def __init__(self):
+    def __init__(self, user_id):
         self.current_track_id = None
         self.current_track_name = None
         self.start_time = 0
-        self.min_listen_time = 30 
+        self.min_listen_time = 10 
+        self.user_id = user_id
 
     def check_status(self, spotify_data):
         """
@@ -37,18 +38,26 @@ class SpotifyTracker:
         if self.current_track_id and track_id != self.current_track_id:
             duration = now - self.start_time
             
-            status = 'SKIPPED' if duration < self.min_listen_time else 'COMPLETED'
-            processing_path = 'hot' if status in ['SKIPPED', 'COMPLETED'] else 'cold'
-            
-            event = {
-                'event_type': 'track_change',
-                'track_id': self.current_track_id,
-                'track_name': self.current_track_name,
-                'status': status,
-                'processing_path': processing_path,
-                'duration_listened': int(duration),
-                'timestamp': int(now)
-            }
+            status = 'SKIPPED' if duration < self.min_listen_time else 'COMPLETED'            
+
+            if status == 'SKIPPED':
+                event = {
+                    'track_id': self.current_track_id,
+                    'track_name': self.current_track_name,
+                    'status': status,
+                    'duration_listened': int(duration),
+                    'user_id': self.user_id,
+                    'timestamp': int(now)
+                }
+            else:
+                event = {
+                    'track_id': self.current_track_id,
+                    'track_name': self.current_track_name,
+                    'status': status,
+                    'duration_listened': int(duration),
+                    'user_id': self.user_id,
+                    'timestamp': int(now)
+                }
 
         if track_id != self.current_track_id:
             self.current_track_id = track_id

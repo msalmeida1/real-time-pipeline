@@ -28,12 +28,12 @@ locals {
     Project = var.project
   }
 
-  build_dir       = "${path.module}/build"
-  requirements    = "${path.module}/../../../src/processor/requirements.txt"
-  hot_path_source = "${path.module}/../../../src/processor/hot_path_function.py"
+  build_dir             = "${path.module}/build"
+  requirements          = "${path.root}/../src/processor/requirements.txt"
+  musical_profile_source = "${path.root}/../src/processor/cold_path_musical_profile_function.py"
 }
 
-resource "aws_iam_role" "lambda_processor_role" {
+resource "aws_iam_role" "cold_path_musical_profile_lambda_role" {
   name = "spotify_processor_role"
 
   assume_role_policy = jsonencode({
@@ -50,7 +50,7 @@ resource "aws_iam_role" "lambda_processor_role" {
 
 resource "aws_iam_role_policy" "lambda_policy" {
   name = "spotify_processor_policy"
-  role = aws_iam_role.lambda_processor_role.id
+  role = aws_iam_role.cold_path_musical_profile_lambda_role.id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -97,32 +97,32 @@ resource "aws_iam_role_policy" "lambda_policy" {
 resource "null_resource" "install_dependencies" {
   triggers = {
     requirements = filesha256(local.requirements)
-    source_code  = filesha256(local.hot_path_source)
+    source_code  = filesha256(local.musical_profile_source)
   }
 
   provisioner "local-exec" {
     command = <<EOT
-      rm -rf ${local.build_dir}/hot_path_function
-      mkdir -p ${local.build_dir}/hot_path_function
-      pip install -r ${local.requirements} -t ${local.build_dir}/hot_path_function
-      cp ${local.hot_path_source} ${local.build_dir}/hot_path_function/
+      rm -rf ${local.build_dir}/cold_path_musical_profile_function
+      mkdir -p ${local.build_dir}/cold_path_musical_profile_function
+      pip install -r ${local.requirements} -t ${local.build_dir}/cold_path_musical_profile_function
+      cp ${local.musical_profile_source} ${local.build_dir}/cold_path_musical_profile_function/
     EOT
   }
 }
 
 data "archive_file" "lambda_zip" {
   type        = "zip"
-  source_dir  = "${local.build_dir}/hot_path_function"
-  output_path = "${local.build_dir}/hot_path_function.zip"
+  source_dir  = "${local.build_dir}/cold_path_musical_profile_function"
+  output_path = "${local.build_dir}/cold_path_musical_profile_function.zip"
 
   depends_on = [null_resource.install_dependencies]
 }
 
-resource "aws_lambda_function" "processor" {
+resource "aws_lambda_function" "cold_path_musical_profile_lambda_arn" {
   filename      = data.archive_file.lambda_zip.output_path
-  function_name = "hot_path_function"
-  role          = aws_iam_role.lambda_processor_role.arn
-  handler       = "hot_path_function.lambda_handler"
+  function_name = "cold_path_musical_profile_function"
+  role          = aws_iam_role.cold_path_musical_profile_lambda_role.arn
+  handler       = "cold_path_musical_profile_function.lambda_handler"
   runtime       = "python3.11"
 
   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
@@ -131,11 +131,12 @@ resource "aws_lambda_function" "processor" {
     variables = {
       DYNAMODB_TABLE    = var.dynamodb_table_name
       SPOTIFY_SECRET_ID = var.spotify_secret_arn
+      SPOTIPY_CACHE_PATH = "/tmp/spotify.cache"
     }
   }
 }
 
 resource "aws_cloudwatch_log_group" "processor_logs" {
-  name              = "/aws/lambda/hot_path_function"
+  name              = "/aws/lambda/cold_path_musical_profile_function"
   retention_in_days = 1
 }

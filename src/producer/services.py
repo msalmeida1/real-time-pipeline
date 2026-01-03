@@ -19,7 +19,7 @@ def post_api_event(event):
     Returns:
         requests.Response: Response object from the POST request.
     """
-    url = "https://a1zru0y1ed.execute-api.us-east-1.amazonaws.com/dev/events"
+    url = "https://3hmsxc2xqe.execute-api.us-east-1.amazonaws.com/dev/events"
     try:
         response = requests.post(url=url, json=event)
         response.raise_for_status()

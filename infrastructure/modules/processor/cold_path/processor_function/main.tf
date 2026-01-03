@@ -9,8 +9,8 @@ locals {
   }
 
   build_dir        = "${path.module}/build"
-  cold_path_source = "${path.module}/../../../src/processor/cold_path_function.py"
-  packaged_zip     = "${local.build_dir}/cold_path_function.zip"
+  cold_path_source = "${path.root}/../src/processor/cold_path_processor_function.py"
+  packaged_zip     = "${local.build_dir}/cold_path_processor_function.zip"
 }
 
 resource "null_resource" "prepare_build" {
@@ -66,44 +66,17 @@ resource "aws_iam_role_policy" "firehose_transform_policy" {
   })
 }
 
-resource "aws_lambda_function" "firehose_transform_cold_path_cold_data" {
+resource "aws_lambda_function" "cold_path_processor_lambda_arn" {
   filename         = data.archive_file.firehose_transform_zip.output_path
-  function_name    = "cold_path_cold_data_firehose_function"
+  function_name    = "cold_path_processor_function"
   role             = aws_iam_role.firehose_transform_role.arn
-  handler          = "cold_path_function.lambda_handler"
+  handler          = "cold_path_processor_function.lambda_handler"
   runtime          = "python3.11"
   source_code_hash = data.archive_file.firehose_transform_zip.output_base64sha256
   timeout          = 60
-
-  environment {
-    variables = {
-      PROCESSING_PATH = "cold"
-    }
-  }
 }
 
-resource "aws_cloudwatch_log_group" "cold_path_cold_data_logs" {
-  name              = "/aws/lambda/cold_path_cold_data_firehose_function"
-  retention_in_days = 1
-}
-
-resource "aws_lambda_function" "firehose_transform_cold_path_hot_data" {
-  filename         = data.archive_file.firehose_transform_zip.output_path
-  function_name    = "cold_path_hot_data_firehose_function"
-  role             = aws_iam_role.firehose_transform_role.arn
-  handler          = "cold_path_function.lambda_handler"
-  runtime          = "python3.11"
-  source_code_hash = data.archive_file.firehose_transform_zip.output_base64sha256
-  timeout          = 60
-
-  environment {
-    variables = {
-      PROCESSING_PATH = "hot"
-    }
-  }
-}
-
-resource "aws_cloudwatch_log_group" "cold_path_hot_data_logs" {
-  name              = "/aws/lambda/cold_path_hot_data_firehose_function"
+resource "aws_cloudwatch_log_group" "cold_path_processor_logs" {
+  name              = "/aws/lambda/cold_path_processor_function"
   retention_in_days = 1
 }

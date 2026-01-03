@@ -1,12 +1,14 @@
-import json
-import boto3
 import base64
+import binascii
+import json
 import os
 import time
 from decimal import Decimal
 
 import logging
 
+import boto3
+from botocore.exceptions import ClientError
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 
@@ -27,21 +29,36 @@ dynamodb = boto3.resource('dynamodb')
 TABLE_NAME = os.environ.get('DYNAMODB_TABLE')
 profile_table = dynamodb.Table(TABLE_NAME)
 
-
 def get_spotify_client():
-    """
-    Initialize and return a Spotify client using credentials from AWS Secrets Manager.
+    """Initialize and return a Spotify client using credentials from AWS Secrets Manager.
+
+    Args:
+        None.
+
     Returns:
         spotipy.Spotify: Authenticated Spotify client.
+
     Raises:
-        RuntimeError: If credentials are missing or cannot be retrieved.
+        RuntimeError: If required configuration is missing.
+        ClientError: If Secrets Manager returns an error.
+        json.JSONDecodeError: If the secret payload is not valid JSON.
+        UnicodeDecodeError: If the secret binary cannot be decoded as UTF-8.
+        binascii.Error: If the secret binary cannot be base64-decoded.
     """
     global _spotify_client
     if _spotify_client:
         return _spotify_client
 
     if not SPOTIFY_SECRET_ID:
-        raise RuntimeError("Missing SPOTIFY_SECRET_ID environment variable")
+        logger.error(
+            json.dumps(
+                {
+                    "message": "Missing SPOTIFY_SECRET_ID environment variable.",
+                    "spotify_secret_id": SPOTIFY_SECRET_ID,
+                }
+            )
+        )
+        raise RuntimeError("Missing SPOTIFY_SECRET_ID environment variable.")
 
     try:
         secret_value = secrets_manager.get_secret_value(SecretId=SPOTIFY_SECRET_ID)
@@ -52,18 +69,37 @@ def get_spotify_client():
         creds = json.loads(secret_string or "{}")
         client_id = creds.get("SPOTIFY_CLIENT_ID")
         client_secret = creds.get("SPOTIFY_CLIENT_SECRET")
-        if not client_id or not client_secret:
-            raise RuntimeError("Secret missing client_id or client_secret fields")
-
-        auth = SpotifyClientCredentials(
-            client_id=client_id,
-            client_secret=client_secret
+    except (ClientError, json.JSONDecodeError, UnicodeDecodeError, binascii.Error) as exc:
+        logger.error(
+            json.dumps(
+                {
+                    "message": "Failed to load Spotify credentials from Secrets Manager.",
+                    "spotify_secret_id": SPOTIFY_SECRET_ID,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                }
+            ),
+            exc_info=True,
         )
-        _spotify_client = spotipy.Spotify(client_credentials_manager=auth)
-        return _spotify_client
-    except Exception:
-        logger.exception("Failed to load Spotify credentials from Secrets Manager")
         raise
+
+    if not client_id or not client_secret:
+        logger.error(
+            json.dumps(
+                {
+                    "message": "Secret missing SPOTIFY_CLIENT_ID or SPOTIFY_CLIENT_SECRET fields.",
+                    "spotify_secret_id": SPOTIFY_SECRET_ID,
+                }
+            )
+        )
+        raise RuntimeError("Secret missing SPOTIFY_CLIENT_ID or SPOTIFY_CLIENT_SECRET fields.")
+
+    auth = SpotifyClientCredentials(
+        client_id=client_id,
+        client_secret=client_secret,
+    )
+    _spotify_client = spotipy.Spotify(client_credentials_manager=auth)
+    return _spotify_client
 
 
 def track_metadata(track_id: str):
@@ -101,6 +137,10 @@ def update_audio_profile(current_profile: dict, new_features: dict) -> dict:
     stats = current_profile.get('audio_profile', {
         'avg_danceability': 0,
         'avg_energy': 0,
+        'avg_loudness': 0,
+        'avg_speechiness': 0,
+        'avg_instrumentalness': 0,
+        'avg_liveness': 0,
         'avg_valence': 0,
         'avg_acousticness': 0,
         'avg_tempo': 0,
@@ -116,6 +156,10 @@ def update_audio_profile(current_profile: dict, new_features: dict) -> dict:
 
     stats['avg_danceability'] = calc_avg('danceability')
     stats['avg_energy'] = calc_avg('energy')
+    stats['avg_loudness'] = calc_avg('loudness')
+    stats['avg_speechiness'] = calc_avg('speechiness')
+    stats['avg_instrumentalness'] = calc_avg('instrumentalness')
+    stats['avg_liveness'] = calc_avg('liveness')
     stats['avg_valence'] = calc_avg('valence')
     stats['avg_acousticness'] = calc_avg('acousticness')
     stats['avg_tempo'] = calc_avg('tempo')
@@ -139,34 +183,6 @@ def update_genre_affinity(current_genres: dict, new_genres: list[str]) -> dict:
         current_genres[safe_genre] = current_genres.get(safe_genre, 0) + 1
     return current_genres
 
-def update_artist_affinity(current_artists: list[str], new_artists: dict) -> dict:
-    """
-    Update artist affinity data.
-    Args:
-        current_artists (list): Existing artist data.
-        new_artists (dict): Dict of artist data from the new track.
-    Returns:
-        list: Updated artist data.
-    """
-    current_artists = current_artists or []
-    artist_map = {artist['artist_id']: artist for artist in current_artists}
-    now = int(time.time())
-    artist_id = new_artists['id']
-
-    if artist_id not in artist_map:
-        artist_map[artist_id] = {
-            'artist_id': artist_id,
-            'name': new_artists['name'],
-            'affinity': 1,
-            'last_played_ts': now
-        }
-    else:
-        artist_map[artist_id]['affinity'] += 1
-        artist_map[artist_id]['last_played_ts'] = now
-
-    return current_artists
-
-
 def update_user_profile(user_id: str, track_id: str, status: str) -> None:
     """
     Update user profile in DynamoDB based on track play event.
@@ -188,8 +204,6 @@ def update_user_profile(user_id: str, track_id: str, status: str) -> None:
             'last_event_ts': now,
             'audio_profile': {'samples': 0},
             'genre_affinity': {},
-            'artist_affinity': [],
-            'recent_history': [],
             'total_tracks_played': 0,
             'total_completions': 0,
             'total_skips': 0,
@@ -216,18 +230,8 @@ def update_user_profile(user_id: str, track_id: str, status: str) -> None:
                 genres,
             )
 
-            profile['artist_affinity'] = update_artist_affinity(
-                profile.get('artist_affinity', []),
-                artist_info
-            )
-
     elif status == 'SKIPPED':
         profile['total_skips'] = profile.get('total_skips', 0) + 1
-
-    new_history_item = {'track_id': track_id, 'status': status, 'ts': now}
-    history = profile.get('recent_history', [])
-    history.insert(0, new_history_item)  
-    profile['recent_history'] = history[:20] 
 
     profile_table.put_item(Item=profile)
     logger.info(f"Updated profile for user {user_id}")
@@ -249,15 +253,14 @@ def lambda_handler(event, context):
         try:
             kinesis_data = record['kinesis']['data']
             decoded_data = base64.b64decode(kinesis_data).decode('utf-8')
-            payload = json.loads(decoded_data, parse_float=Decimal)
-
-            processing_path = payload.get('processing_path')
-            if processing_path != 'hot':
-                continue      
-
+            payload = json.loads(decoded_data, parse_float=Decimal)  
             track_id = payload['track_id']
             status = payload['status']
             user_id = payload['user_id']
+
+            if status not in ['COMPLETED', 'SKIPPED']:
+                logger.warning(f"Dropping record with unsupported status: {status}")
+                continue
 
             update_user_profile(user_id, track_id, status)
 
